@@ -1,0 +1,22 @@
+# Ignore all .pkl files
+*.pkl
+
+# Ignore the myenv folder
+myenv/
+# Ignore the .env file
+.env    
+# Ignore the .DS_Store file
+.DS_Store
+
+# Ignore the __pycache__ folder
+__pycache__/    
+# Ignore the .pytest_cache folder
+.pytest_cache/  
+# Ignore the .mypy_cache folder
+.mypy_cache/        
+# Ignore the .coverage file
+.coverage
+
+# Ignore the .pytest_cache folder
+.pytest_cache/
+# Ignore the .mypy_cache folder 
