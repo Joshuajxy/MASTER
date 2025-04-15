@@ -58,14 +58,14 @@ class SequenceModel():
     def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path = 'model/', save_prefix= ''):
         self.n_epochs = n_epochs
         self.lr = lr
-        self.device = torch.device(f"cuda:{GPU}" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")  # Force CPU usage
         self.seed = seed
         self.train_stop_loss_thred = train_stop_loss_thred
 
         if self.seed is not None:
             np.random.seed(self.seed)
             torch.manual_seed(self.seed)
-            torch.cuda.manual_seed_all(self.seed)
+            # Removed torch.cuda.manual_seed_all(self.seed) since GPU is not available
             torch.backends.cudnn.deterministic = True
         self.fitted = -1
 
@@ -148,30 +148,33 @@ class SequenceModel():
         return data_loader
 
     def load_param(self, param_path):
-        self.model.load_state_dict(torch.load(param_path, map_location=self.device))
-        self.fitted = 'Previously trained.'
+        self.model.load_state_dict(torch.load(param_path, map_location=self.device))  # Ensure CPU compatibility
+        self.fitted = 0  # Set to 0 to indicate the model is loaded and ready for prediction
 
     def fit(self, dl_train, dl_valid=None):
         train_loader = self._init_data_loader(dl_train, shuffle=True, drop_last=True)
         best_param = None
         for step in range(self.n_epochs):
             train_loss = self.train_epoch(train_loader)
-            self.fitted = step
+            self.fitted = step  # Update fitted to indicate the model is trained
             if dl_valid:
                 predictions, metrics = self.predict(dl_valid)
                 print("Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f." % (step, train_loss, metrics['IC'],  metrics['ICIR'],  metrics['RIC'],  metrics['RICIR']))
-            else: print("Epoch %d, train_loss %.6f" % (step, train_loss))
+            else: 
+                print("Epoch %d, train_loss %.6f" % (step, train_loss))
         
             if train_loss <= self.train_stop_loss_thred:
                 best_param = copy.deepcopy(self.model.state_dict())
                 torch.save(best_param, f'{self.save_path}/{self.save_prefix}_{self.seed}.pkl')
                 break
-        
 
-        
+        # Save the best model parameters if training completes all epochs
+        if best_param is None:
+            best_param = copy.deepcopy(self.model.state_dict())
+            torch.save(best_param, f'{self.save_path}/{self.save_prefix}_{self.seed}.pkl')
 
     def predict(self, dl_test):
-        if self.fitted<0:
+        if self.fitted < 0:  # Ensure this comparison works correctly
             raise ValueError("model is not fitted yet!")
         else:
             print('Epoch:', self.fitted)

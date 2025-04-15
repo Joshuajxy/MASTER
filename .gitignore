@@ -20,3 +20,9 @@ __pycache__/
 # Ignore the .pytest_cache folder
 .pytest_cache/
 # Ignore the .mypy_cache folder 
+.mypy_cache/
+# Ignore the .coverage file
+.coverage   
+# Ignore the .hypothesis folder
+logs/
+ data/opensource/
