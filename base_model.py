@@ -55,7 +55,7 @@ class DailyBatchSamplerRandom(Sampler):
 
 
 class SequenceModel():
-    def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path = 'model/', save_prefix= ''):
+    def __init__(self, n_epochs, lr, GPU=None, seed=None, train_stop_loss_thred=None, save_path = 'model/', save_prefix= '', writer=None):
         self.n_epochs = n_epochs
         self.lr = lr
         self.device = torch.device("cpu")  # Force CPU usage
@@ -74,6 +74,7 @@ class SequenceModel():
 
         self.save_path = save_path
         self.save_prefix = save_prefix
+        self.writer = writer  # TensorBoard SummaryWriter
 
 
     def init_model(self):
@@ -91,6 +92,7 @@ class SequenceModel():
     def train_epoch(self, data_loader):
         self.model.train()
         losses = []
+        batch_idx = 0
 
         for data in data_loader:
             data = torch.squeeze(data, dim=0)
@@ -117,10 +119,25 @@ class SequenceModel():
             loss = self.loss_fn(pred, label)
             losses.append(loss.item())
 
+            # Log batch-level metrics if writer is available
+            if self.writer is not None and self.fitted is not None:
+                # Only log every 10 batches to avoid overwhelming TensorBoard
+                if batch_idx % 10 == 0:
+                    global_step = self.fitted * len(data_loader) + batch_idx
+                    self.writer.add_scalar('Training/BatchLoss', loss.item(), global_step)
+                    
+                    # Log feature statistics
+                    if batch_idx == 0:  # Only log once per epoch to save space
+                        self.writer.add_histogram(f'Epoch_{self.fitted}/FeatureValues', feature.float(), global_step)
+                        self.writer.add_histogram(f'Epoch_{self.fitted}/Labels', label, global_step)
+                        self.writer.add_histogram(f'Epoch_{self.fitted}/Predictions', pred, global_step)
+            
             self.train_optimizer.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_value_(self.model.parameters(), 3.0)
             self.train_optimizer.step()
+            
+            batch_idx += 1
 
         return float(np.mean(losses))
 
@@ -154,18 +171,51 @@ class SequenceModel():
     def fit(self, dl_train, dl_valid=None):
         train_loader = self._init_data_loader(dl_train, shuffle=True, drop_last=True)
         best_param = None
+        
+        # Log model graph to TensorBoard if writer is available
+        if self.writer is not None:
+            # Get a sample batch to trace the model
+            for data in train_loader:
+                data = torch.squeeze(data, dim=0)
+                feature = data[:, :, 0:-1].to(self.device).float()
+                self.writer.add_graph(self.model, feature)
+                break
+        
         for step in range(self.n_epochs):
             train_loss = self.train_epoch(train_loader)
             self.fitted = step  # Update fitted to indicate the model is trained
+            
+            # Log training loss to TensorBoard
+            if self.writer is not None:
+                self.writer.add_scalar('Training/Loss', train_loss, step)
+                
+                # Log model parameters histograms
+                for name, param in self.model.named_parameters():
+                    if param.requires_grad:
+                        self.writer.add_histogram(f"Parameters/{name}", param.data, step)
+                        if param.grad is not None:
+                            self.writer.add_histogram(f"Gradients/{name}", param.grad, step)
+            
             if dl_valid:
                 predictions, metrics = self.predict(dl_valid)
                 print("Epoch %d, train_loss %.6f, valid ic %.4f, icir %.3f, rankic %.4f, rankicir %.3f." % (step, train_loss, metrics['IC'],  metrics['ICIR'],  metrics['RIC'],  metrics['RICIR']))
+                
+                # Log validation metrics to TensorBoard
+                if self.writer is not None:
+                    self.writer.add_scalar('Validation/IC', metrics['IC'], step)
+                    self.writer.add_scalar('Validation/ICIR', metrics['ICIR'], step)
+                    self.writer.add_scalar('Validation/RIC', metrics['RIC'], step)
+                    self.writer.add_scalar('Validation/RICIR', metrics['RICIR'], step)
             else: 
                 print("Epoch %d, train_loss %.6f" % (step, train_loss))
         
             if train_loss <= self.train_stop_loss_thred:
                 best_param = copy.deepcopy(self.model.state_dict())
                 torch.save(best_param, f'{self.save_path}/{self.save_prefix}_{self.seed}.pkl')
+                
+                # Log model at best epoch
+                if self.writer is not None:
+                    self.writer.add_text('Training/BestModel', f'Best model saved at epoch {step} with loss {train_loss:.6f}', step)
                 break
 
         # Save the best model parameters if training completes all epochs
